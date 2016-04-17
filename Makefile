@@ -1,4 +1,8 @@
 PROJECT = base64-cdc
+
+# Directory containing our Rust library
+RUST_BASE_PATH = ./base64-rs-ffi
+
 OBJECTS = \
 		./main.o \
 		./lib/USBDevice/USBDevice/USBHAL_LPC17.o \
@@ -21,9 +25,11 @@ INCLUDE_PATHS = \
 		-I./lib/mbed/TARGET_LPC1768/TOOLCHAIN_GCC_ARM \
 		-I./lib/mbed/TARGET_LPC1768/TARGET_NXP \
 		-I./lib/mbed/TARGET_LPC1768/TARGET_NXP/TARGET_LPC176X \
-		-I./lib/mbed/TARGET_LPC1768/TARGET_NXP/TARGET_LPC176X/TARGET_MBED_LPC1768
-LIBRARY_PATHS = -L./lib/mbed/TARGET_LPC1768/TOOLCHAIN_GCC_ARM
-LIBRARIES = -lmbed
+		-I./lib/mbed/TARGET_LPC1768/TARGET_NXP/TARGET_LPC176X/TARGET_MBED_LPC1768 \
+		-I./$(RUST_BASE_PATH)/include
+LIBRARY_PATHS = \
+		-L./lib/mbed/TARGET_LPC1768/TOOLCHAIN_GCC_ARM
+LIBRARIES = -lmbed -lbase64_cfl_wrapper
 LINKER_SCRIPT = ./lib/mbed/TARGET_LPC1768/TOOLCHAIN_GCC_ARM/LPC1768.ld
 
 ###############################################################################
@@ -37,6 +43,7 @@ SIZE    = arm-none-eabi-size
 
 
 CPU = -mcpu=cortex-m3 -mthumb
+TARGET = thumbv7m-none-eabi
 CC_FLAGS = \
 		$(CPU) \
 		-c \
@@ -80,19 +87,25 @@ LD_SYS_LIBS = \
 		-lgcc \
 		-lnosys
 
+export CARGO_FLAGS = --target=$(TARGET)
+
 ifeq ($(DEBUG), 1)
   CC_FLAGS += -DDEBUG -O0
+  LIBRARY_PATHS += -L$(RUST_BASE_PATH)/target/$(TARGET)/debug
 else
   CC_FLAGS += -DNDEBUG -Os
+  CARGO_FLAGS += --release
+  LIBRARY_PATHS += -L$(RUST_BASE_PATH)/target/$(TARGET)/release
 endif
 
-.PHONY: all clean lst size
+.PHONY: all clean lst size cargo
 
 all: $(PROJECT).bin $(PROJECT).hex size
 
 clean:
 	@echo Cleaning up...
 	@rm -f $(PROJECT).bin $(PROJECT).elf $(PROJECT).hex $(PROJECT).map $(PROJECT).lst $(OBJECTS) $(DEPS)
+	@$(MAKE) -C $(RUST_BASE_PATH) clean
 
 .asm.o:
 	@echo "Assembling $<"
@@ -112,7 +125,7 @@ clean:
 	@echo "Building $<"
 	@$(CPP) $(CC_FLAGS) $(CC_SYMBOLS) -std=gnu++98 -fno-rtti $(INCLUDE_PATHS) -o $@ $<
 
-$(PROJECT).elf: $(OBJECTS) $(SYS_OBJECTS)
+$(PROJECT).elf: $(OBJECTS) $(SYS_OBJECTS) | cargo
 	@echo "Linking $@"
 	@$(LD) $(LD_FLAGS) -T$(LINKER_SCRIPT) $(LIBRARY_PATHS) -o $@ $^ $(LIBRARIES) $(LD_SYS_LIBS) $(LIBRARIES) $(LD_SYS_LIBS)
 
@@ -130,7 +143,8 @@ lst: $(PROJECT).lst
 size: $(PROJECT).elf
 	$(SIZE) $(PROJECT).elf
 
+cargo:
+	$(MAKE) -C $(RUST_BASE_PATH) all
+
 DEPS = $(OBJECTS:.o=.d) $(SYS_OBJECTS:.o=.d)
 -include $(DEPS)
-
-
